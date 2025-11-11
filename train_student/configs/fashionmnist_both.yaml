@@ -1,0 +1,19 @@
+# Конфигурация для обучения студента обоими методами на FashionMNIST
+dataset: FashionMNIST
+epochs: 15
+batch_size: 128
+lr: 0.001
+temperature: 4.0
+alpha: 0.7
+beta: 100.0
+hint_layer: -2
+teacher_dir: ./pretrained
+save_dir: ./results
+fidelity_freq: 1
+methods: both
+teacher_names:
+  - teacher_cnn1
+  - teacher_cnn2
+  - teacher_resnet
+use_pretrained: false
+
