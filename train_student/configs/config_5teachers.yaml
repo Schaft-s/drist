@@ -1,0 +1,13 @@
+# Конфигурация для обучения 5 учителей на FashionMNIST
+# МАКСИМАЛЬНОЕ РАЗНООБРАЗИЕ: по архитектуре и размеру
+dataset: FashionMNIST
+epochs: 25
+batch_size: 128
+lr: 0.001
+save_dir: ./pretrained
+teachers:
+  - teacher_cnn1      # 275K params - базовая CNN
+  - teacher_cnn2      # 1.6M params - широкая CNN
+  - teacher_resnet    # 140K params - ResNet-style
+  - teacher_vgg       # 640K params - VGG-style
+  - teacher_densenet  # 450K params - DenseNet-style

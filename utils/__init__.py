@@ -1,40 +1,42 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Утилиты для Knowledge Distillation
+Utils package for Knowledge Distillation experiments
 """
 
 from .utils import (
-    compute_fidelity_metrics,
     MetricsLogger,
+    compute_fidelity_metrics,
     evaluate_model,
     plot_training_metrics
 )
 
 from .distillation_losses import (
     DistillKL,
-    CAMKD,
-    FidelityKL,
-    cosine_similarity_loss
+    CAMKD
 )
 
-from .analysis import (
+from .analysis_4methods import (
+    analyze_4methods,
     load_metrics,
-    compare_two_methods,
     print_comparison_statistics,
-    compare_experiments
+    plot_comparison_12figures
 )
 
 __all__ = [
-    'compute_fidelity_metrics',
+    # utils
     'MetricsLogger',
+    'compute_fidelity_metrics',
     'evaluate_model',
     'plot_training_metrics',
+    
+    # losses
     'DistillKL',
     'CAMKD',
-    'FidelityKL',
-    'cosine_similarity_loss',
+    
+    # analysis
+    'analyze_4methods',
     'load_metrics',
-    'compare_two_methods',
     'print_comparison_statistics',
-    'compare_experiments',
+    'plot_comparison_12figures'
 ]
-

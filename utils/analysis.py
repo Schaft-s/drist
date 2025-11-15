@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 Анализ и визуализация результатов Knowledge Distillation
-Сравнение CAMKD vs Vanilla KD с поддержкой Top-1 Agreement
+Сравнение 4 методов: Centroid, Best, Median, CAMKD
+ИСПРАВЛЕНО: добавлены все импорты
 """
 
 import json
-import matplotlib.pyplot as plt
 import numpy as np
-import os
+import matplotlib.pyplot as plt
+from collections import defaultdict
 
 
 def load_metrics(filepath):
@@ -21,480 +22,299 @@ def load_metrics(filepath):
         return None
 
 
-def compare_two_methods(metrics_camkd, metrics_vanilla, teacher_names, save_dir):
+def print_comparison_statistics_4methods(metrics_dict, method_names):
     """
-    Создает 14 сравнительных графиков (4x4) для двух методов
+    Выводит текстовую статистику сравнения для 4 методов
+    
+    Args:
+        metrics_dict: {'centroid': metrics, 'best': metrics, ...}
+        method_names: ['Centroid', 'Best', 'Median', 'CAMKD']
     """
+    
+    print("\n" + "="*80)
+    print("СТАТИСТИКА СРАВНЕНИЯ: 4 МЕТОДА ДИСТИЛЛЯЦИИ")
+    print("="*80)
+    
+    # Test Accuracy
+    print(f"\nTest Accuracy (Final):")
+    for method in metrics_dict:
+        acc = metrics_dict[method]['test_acc'][-1]
+        print(f"  {method:12s}: {acc:.2f}%")
+    
+    # Найти лучший
+    best_method = max(metrics_dict.keys(), key=lambda m: metrics_dict[m]['test_acc'][-1])
+    print(f"  → Лучший: {best_method}")
+    
+    # Test Loss
+    print(f"\nTest Loss (Final):")
+    for method in metrics_dict:
+        loss = metrics_dict[method]['test_loss'][-1]
+        print(f"  {method:12s}: {loss:.4f}")
+    
+    # Centroid Fidelity (ГЛАВНАЯ МЕТРИКА!)
+    print(f"\n⭐ Centroid Fidelity (Final) - ГЛАВНАЯ МЕТРИКА:")
+    for method in metrics_dict:
+        centroid_fid = metrics_dict[method].get('centroid_fidelity', [])
+        if centroid_fid:
+            print(f"  {method:12s}: {centroid_fid[-1]:.4f}")
+    
+    # Найти лучший (меньше = лучше)
+    best_centroid = min(metrics_dict.keys(), 
+                       key=lambda m: metrics_dict[m].get('centroid_fidelity', [999])[-1] if metrics_dict[m].get('centroid_fidelity') else 999)
+    print(f"  → Лучший (ближе к центроиду): {best_centroid}")
+    
+    # Individual Fidelity (Average)
+    print(f"\nAverage Individual Fidelity (Final):")
+    for method in metrics_dict:
+        individual_fid = metrics_dict[method].get('individual_fidelity', {})
+        if individual_fid and isinstance(individual_fid, dict):
+            values = [individual_fid[k][-1] for k in individual_fid if isinstance(individual_fid[k], list) and len(individual_fid[k]) > 0]
+            if values:
+                avg_fid = np.mean(values)
+                print(f"  {method:12s}: {avg_fid:.4f}")
+    
+    # Top-1 Agreement (Average)
+    print(f"\nAverage Top-1 Agreement (Final %):")
+    for method in metrics_dict:
+        top1_agr = metrics_dict[method].get('top1_agreement', {})
+        if top1_agr and isinstance(top1_agr, dict):
+            values = [top1_agr[k][-1] for k in top1_agr if isinstance(top1_agr[k], list) and len(top1_agr[k]) > 0]
+            if values:
+                avg_agr = np.mean(values)
+                print(f"  {method:12s}: {avg_agr:.1f}%")
+    
+    print("="*80 + "\n")
 
-    fig = plt.figure(figsize=(24, 18))
 
-    epochs_camkd = list(range(1, len(metrics_camkd['test_acc']) + 1))
-    epochs_vanilla = list(range(1, len(metrics_vanilla['test_acc']) + 1))
-
-    # ========================================================================
+def compare_4methods_plot(metrics_dict, teacher_names, save_dir):
+    """
+    Строит сравнительные графики для 4 методов
+    
+    Args:
+        metrics_dict: {'centroid': metrics, 'best': metrics, ...}
+        teacher_names: список имён учителей
+        save_dir: папка для сохранения
+    """
+    
+    methods = list(metrics_dict.keys())
+    colors = {'centroid': 'blue', 'best': 'red', 'median': 'green', 'camkd': 'purple'}
+    markers = {'centroid': 'o', 'best': 's', 'median': '^', 'camkd': 'D'}
+    
+    fig = plt.figure(figsize=(24, 16))
+    
     # 1. Test Accuracy Comparison
-    # ========================================================================
-    ax1 = plt.subplot(4, 4, 1)
-    ax1.plot(epochs_camkd, metrics_camkd['test_acc'], 'b-o', 
-            label='CAMKD', linewidth=2, markersize=5)
-    ax1.plot(epochs_vanilla, metrics_vanilla['test_acc'], 'r-s', 
-            label='Vanilla KD', linewidth=2, markersize=5)
+    ax1 = plt.subplot(3, 4, 1)
+    for method in methods:
+        epochs = list(range(1, len(metrics_dict[method]['test_acc']) + 1))
+        ax1.plot(epochs, metrics_dict[method]['test_acc'], 
+                color=colors.get(method, 'gray'), marker=markers.get(method, 'o'),
+                label=method.capitalize(), linewidth=2, markersize=5)
     ax1.set_xlabel('Epoch', fontsize=11)
     ax1.set_ylabel('Test Accuracy (%)', fontsize=11)
-    ax1.set_title('1. Test Accuracy Comparison', fontsize=12, fontweight='bold')
-    ax1.legend(fontsize=10)
+    ax1.set_title('Test Accuracy: 4 Methods', fontsize=12, fontweight='bold')
+    ax1.legend()
     ax1.grid(True, alpha=0.3)
-
-    # ========================================================================
+    
     # 2. Test Loss Comparison
-    # ========================================================================
-    ax2 = plt.subplot(4, 4, 2)
-    ax2.plot(epochs_camkd, metrics_camkd['test_loss'], 'b-o', 
-            label='CAMKD', linewidth=2, markersize=5)
-    ax2.plot(epochs_vanilla, metrics_vanilla['test_loss'], 'r-s', 
-            label='Vanilla KD', linewidth=2, markersize=5)
+    ax2 = plt.subplot(3, 4, 2)
+    for method in methods:
+        epochs = list(range(1, len(metrics_dict[method]['test_loss']) + 1))
+        ax2.plot(epochs, metrics_dict[method]['test_loss'], 
+                color=colors.get(method, 'gray'), marker=markers.get(method, 'o'),
+                label=method.capitalize(), linewidth=2, markersize=5)
     ax2.set_xlabel('Epoch', fontsize=11)
     ax2.set_ylabel('Test Loss', fontsize=11)
-    ax2.set_title('2. Test Loss Comparison', fontsize=12, fontweight='bold')
-    ax2.legend(fontsize=10)
+    ax2.set_title('Test Loss: 4 Methods', fontsize=12, fontweight='bold')
+    ax2.legend()
     ax2.grid(True, alpha=0.3)
-
-    # ========================================================================
-    # 3. Accuracy Improvement (CAMKD - Vanilla)
-    # ========================================================================
-    ax3 = plt.subplot(4, 4, 3)
-    min_len = min(len(metrics_camkd['test_acc']), len(metrics_vanilla['test_acc']))
-    acc_diff = [c - v for c, v in zip(metrics_camkd['test_acc'][:min_len], 
-                                      metrics_vanilla['test_acc'][:min_len])]
-    ax3.plot(range(1, len(acc_diff) + 1), acc_diff, 'g-^', linewidth=2, markersize=6)
-    ax3.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-    ax3.fill_between(range(1, len(acc_diff) + 1), acc_diff, 0, alpha=0.3, color='green')
+    
+    # 3. Centroid Fidelity ⭐ ГЛАВНЫЙ ГРАФИК
+    ax3 = plt.subplot(3, 4, 3)
+    for method in methods:
+        centroid_fid = metrics_dict[method].get('centroid_fidelity', [])
+        if centroid_fid:
+            fid_epochs = list(range(1, len(centroid_fid) + 1))
+            ax3.plot(fid_epochs, centroid_fid, 
+                    color=colors.get(method, 'gray'), marker=markers.get(method, 'o'),
+                    label=method.capitalize(), linewidth=2, markersize=5)
     ax3.set_xlabel('Epoch', fontsize=11)
-    ax3.set_ylabel('Accuracy Difference (%)', fontsize=11)
-    ax3.set_title('3. CAMKD - Vanilla (+green=CAMKD better)', fontsize=12, fontweight='bold')
+    ax3.set_ylabel('KL Divergence', fontsize=11)
+    ax3.set_title('⭐ Centroid Fidelity (ключевая)', fontsize=12, fontweight='bold')
+    ax3.legend()
     ax3.grid(True, alpha=0.3)
-
-    # ========================================================================
-    # 4-6. Individual Fidelity
-    # ========================================================================
-    individual_camkd = metrics_camkd.get('individual_fidelity', {})
-    individual_vanilla = metrics_vanilla.get('individual_fidelity', {})
-
-    if individual_camkd and individual_vanilla and isinstance(individual_camkd, dict):
-        # Сортируем ключи для консистентности
-        keys = sorted(individual_camkd.keys())
-
-        for plot_idx, key in enumerate(keys[:3]):  # Первые 3 учителя
-            ax = plt.subplot(4, 4, 4 + plot_idx)
-            camkd_vals = individual_camkd[key] if isinstance(individual_camkd[key], list) else []
-            vanilla_vals = individual_vanilla.get(key, []) if isinstance(individual_vanilla.get(key), list) else []
-
-            if camkd_vals and vanilla_vals:
-                epochs_fid = list(range(1, len(camkd_vals) + 1))
-                ax.plot(epochs_fid, camkd_vals, 'b-o', label='CAMKD', linewidth=2, markersize=4)
-                ax.plot(epochs_fid, vanilla_vals, 'r-s', label='Vanilla', linewidth=2, markersize=4)
-                ax.set_xlabel('Epoch', fontsize=10)
-                ax.set_ylabel('KL Divergence', fontsize=10)
-                ax.set_title(f'{4+plot_idx}. Individual Fidelity: {key}', fontsize=11, fontweight='bold')
-                ax.legend(fontsize=9)
-                ax.grid(True, alpha=0.3)
-
-    # ========================================================================
-    # 7. Centroid Fidelity
-    # ========================================================================
-    ax7 = plt.subplot(4, 4, 7)
-    centroid_camkd = metrics_camkd.get('centroid_fidelity', [])
-    centroid_vanilla = metrics_vanilla.get('centroid_fidelity', [])
-
-    if centroid_camkd and centroid_vanilla:
-        min_len = min(len(centroid_camkd), len(centroid_vanilla))
-        epochs_c = list(range(1, min_len + 1))
-        ax7.plot(epochs_c, centroid_camkd[:min_len], 'b-o', 
-                label='CAMKD', linewidth=2, markersize=5)
-        ax7.plot(epochs_c, centroid_vanilla[:min_len], 'r-s', 
-                label='Vanilla', linewidth=2, markersize=5)
-        ax7.set_xlabel('Epoch', fontsize=11)
-        ax7.set_ylabel('KL Divergence', fontsize=11)
-        ax7.set_title('7. Centroid Fidelity', fontsize=12, fontweight='bold')
-        ax7.legend(fontsize=10)
-        ax7.grid(True, alpha=0.3)
-
-    # ========================================================================
-    # 8. Average Individual Fidelity
-    # ========================================================================
-    ax8 = plt.subplot(4, 4, 8)
-    if individual_camkd and individual_vanilla and isinstance(individual_camkd, dict):
-        keys = sorted(individual_camkd.keys())
-        min_len_fid = min(len(individual_camkd[keys[0]]) if isinstance(individual_camkd[keys[0]], list) else 0 
-                         for key in keys if key in individual_camkd)
-
-        if min_len_fid > 0:
-            avg_camkd = [np.mean([individual_camkd[key][e] 
-                                 for key in keys if isinstance(individual_camkd[key], list) and e < len(individual_camkd[key])]) 
-                        for e in range(min_len_fid)]
-            avg_vanilla = [np.mean([individual_vanilla[key][e] 
-                                   for key in keys if isinstance(individual_vanilla[key], list) and e < len(individual_vanilla[key])]) 
-                          for e in range(min_len_fid)]
-
-            epochs_avg = list(range(1, len(avg_camkd) + 1))
-            ax8.plot(epochs_avg, avg_camkd, 'b-o', label='CAMKD', linewidth=2, markersize=5)
-            ax8.plot(epochs_avg, avg_vanilla, 'r-s', label='Vanilla', linewidth=2, markersize=5)
-            ax8.set_xlabel('Epoch', fontsize=11)
-            ax8.set_ylabel('Avg KL Divergence', fontsize=11)
-            ax8.set_title('8. Average Individual Fidelity', fontsize=12, fontweight='bold')
-            ax8.legend(fontsize=10)
-            ax8.grid(True, alpha=0.3)
-
-    # ========================================================================
-    # 9. Teacher Weights (только CAMKD + справка о Vanilla)
-    # ========================================================================
-    ax9 = plt.subplot(4, 4, 9)
-    teacher_weights_camkd = metrics_camkd.get('teacher_weights', {})
-
-    if teacher_weights_camkd and isinstance(teacher_weights_camkd, dict):
-        keys = sorted(teacher_weights_camkd.keys())
-        min_len_w = min(len(teacher_weights_camkd[key]) 
-                       for key in keys if isinstance(teacher_weights_camkd[key], list))
-
-        if min_len_w > 0:
-            epochs_w = list(range(1, min_len_w + 1))
-            for key in keys:
-                if isinstance(teacher_weights_camkd[key], list):
-                    ax9.plot(epochs_w, teacher_weights_camkd[key][:min_len_w], 
-                            marker='o', label=f'{key} (CAMKD)', linewidth=2)
-
-            # Линия для равных весов (Vanilla)
-            equal_weight = 1.0 / len(keys)
-            ax9.axhline(y=equal_weight, color='gray', linestyle='--', 
-                       linewidth=2, label='Vanilla (equal)', alpha=0.7)
-
-            ax9.set_xlabel('Epoch', fontsize=11)
-            ax9.set_ylabel('Weight', fontsize=11)
-            ax9.set_title('9. Teacher Weights (CAMKD vs Vanilla)', fontsize=12, fontweight='bold')
-            ax9.legend(fontsize=9)
-            ax9.grid(True, alpha=0.3)
-
-    # ========================================================================
-    # 10. Final Metrics Bar Chart
-    # ========================================================================
-    ax10 = plt.subplot(4, 4, 10)
-    metrics_to_plot = ['Accuracy', 'Loss']
-    camkd_vals = [metrics_camkd['test_acc'][-1], metrics_camkd['test_loss'][-1]]
-    vanilla_vals = [metrics_vanilla['test_acc'][-1], metrics_vanilla['test_loss'][-1]]
-
-    x = np.arange(len(metrics_to_plot))
-    width = 0.35
-
-    bars1 = ax10.bar(x - width/2, camkd_vals, width, label='CAMKD', alpha=0.8, color='blue')
-    bars2 = ax10.bar(x + width/2, vanilla_vals, width, label='Vanilla', alpha=0.8, color='red')
-
-    ax10.set_ylabel('Value', fontsize=11)
-    ax10.set_title('10. Final Metrics', fontsize=12, fontweight='bold')
-    ax10.set_xticks(x)
-    ax10.set_xticklabels(metrics_to_plot)
-    ax10.legend(fontsize=10)
+    
+    # 4. Final Accuracy Bar Chart
+    ax4 = plt.subplot(3, 4, 4)
+    final_accs = [metrics_dict[m]['test_acc'][-1] for m in methods]
+    bars = ax4.bar(methods, final_accs, color=[colors.get(m, 'gray') for m in methods])
+    ax4.set_ylabel('Test Accuracy (%)', fontsize=11)
+    ax4.set_title('Final Test Accuracy', fontsize=12, fontweight='bold')
+    ax4.set_ylim([min(final_accs) - 1, max(final_accs) + 1])
+    for bar, acc in zip(bars, final_accs):
+        height = bar.get_height()
+        ax4.text(bar.get_x() + bar.get_width()/2., height,
+                f'{acc:.2f}%', ha='center', va='bottom', fontsize=10)
+    ax4.grid(True, alpha=0.3, axis='y')
+    
+    # 5-8. Individual Fidelity для первых 4 учителей
+    for idx in range(min(4, 5)):  # Максимум 4 графика
+        ax = plt.subplot(3, 4, 5 + idx)
+        for method in methods:
+            individual_fid = metrics_dict[method].get('individual_fidelity', {})
+            key = f"teacher_{idx}"
+            if individual_fid and key in individual_fid:
+                fid_data = individual_fid[key]
+                if isinstance(fid_data, list) and len(fid_data) > 0:
+                    fid_epochs = list(range(1, len(fid_data) + 1))
+                    ax.plot(fid_epochs, fid_data, 
+                           color=colors.get(method, 'gray'), marker=markers.get(method, 'o'),
+                           label=method.capitalize(), linewidth=2, markersize=4)
+        ax.set_xlabel('Epoch', fontsize=11)
+        ax.set_ylabel('KL Divergence', fontsize=11)
+        teacher_name = teacher_names[idx] if idx < len(teacher_names) else f"Teacher {idx}"
+        ax.set_title(f'Individual Fidelity: {teacher_name}', fontsize=12, fontweight='bold')
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+    
+    # 9. Average Top-1 Agreement
+    ax9 = plt.subplot(3, 4, 9)
+    for method in methods:
+        top1_agr = metrics_dict[method].get('top1_agreement', {})
+        if top1_agr and isinstance(top1_agr, dict):
+            # Average across all teachers
+            num_epochs = len(list(top1_agr.values())[0]) if top1_agr.values() else 0
+            if num_epochs > 0:
+                avg_agreements = []
+                for epoch_idx in range(num_epochs):
+                    epoch_agr = [top1_agr[k][epoch_idx] for k in top1_agr 
+                               if isinstance(top1_agr[k], list) and epoch_idx < len(top1_agr[k])]
+                    if epoch_agr:
+                        avg_agreements.append(np.mean(epoch_agr))
+                
+                if avg_agreements:
+                    agr_epochs = list(range(1, len(avg_agreements) + 1))
+                    ax9.plot(agr_epochs, avg_agreements, 
+                            color=colors.get(method, 'gray'), marker=markers.get(method, 'o'),
+                            label=method.capitalize(), linewidth=2, markersize=5)
+    ax9.set_xlabel('Epoch', fontsize=11)
+    ax9.set_ylabel('Top-1 Agreement (%)', fontsize=11)
+    ax9.set_title('Average Top-1 Agreement', fontsize=12, fontweight='bold')
+    ax9.legend()
+    ax9.grid(True, alpha=0.3)
+    ax9.set_ylim([0, 105])
+    
+    # 10. Final Centroid Fidelity Bar Chart
+    ax10 = plt.subplot(3, 4, 10)
+    final_centroid = [metrics_dict[m].get('centroid_fidelity', [0])[-1] 
+                     if metrics_dict[m].get('centroid_fidelity') else 0 
+                     for m in methods]
+    bars = ax10.bar(methods, final_centroid, color=[colors.get(m, 'gray') for m in methods])
+    ax10.set_ylabel('KL Divergence', fontsize=11)
+    ax10.set_title('⭐ Final Centroid Fidelity', fontsize=12, fontweight='bold')
+    for bar, fid in zip(bars, final_centroid):
+        height = bar.get_height()
+        ax10.text(bar.get_x() + bar.get_width()/2., height,
+                f'{fid:.4f}', ha='center', va='bottom', fontsize=10)
     ax10.grid(True, alpha=0.3, axis='y')
-
-    # Add value labels
-    for bar in bars1:
-        height = bar.get_height()
-        ax10.text(bar.get_x() + bar.get_width()/2., height,
-                 f'{height:.2f}', ha='center', va='bottom', fontsize=9)
-    for bar in bars2:
-        height = bar.get_height()
-        ax10.text(bar.get_x() + bar.get_width()/2., height,
-                 f'{height:.2f}', ha='center', va='bottom', fontsize=9)
-
-    # ========================================================================
-    # 11. Final Individual Fidelity Bar Chart
-    # ========================================================================
-    ax11 = plt.subplot(4, 4, 11)
-    if individual_camkd and individual_vanilla and isinstance(individual_camkd, dict):
-        keys = sorted(individual_camkd.keys())[:3]  # Первые 3
-        final_camkd = [individual_camkd[key][-1] if isinstance(individual_camkd[key], list) else 0 for key in keys]
-        final_vanilla = [individual_vanilla.get(key, [0])[-1] if isinstance(individual_vanilla.get(key), list) else 0 for key in keys]
-
-        x = np.arange(len(keys))
-        width = 0.35
-
-        bars1 = ax11.bar(x - width/2, final_camkd, width, label='CAMKD', alpha=0.8, color='blue')
-        bars2 = ax11.bar(x + width/2, final_vanilla, width, label='Vanilla', alpha=0.8, color='red')
-
-        ax11.set_ylabel('KL Divergence', fontsize=11)
-        ax11.set_title('11. Final Individual Fidelity', fontsize=12, fontweight='bold')
-        ax11.set_xticks(x)
-        ax11.set_xticklabels([k.replace('teacher_', 'T') for k in keys], rotation=0)
-        ax11.legend(fontsize=10)
-        ax11.grid(True, alpha=0.3, axis='y')
-
-        for bar in bars1:
-            height = bar.get_height()
-            ax11.text(bar.get_x() + bar.get_width()/2., height,
-                     f'{height:.3f}', ha='center', va='bottom', fontsize=8)
-        for bar in bars2:
-            height = bar.get_height()
-            ax11.text(bar.get_x() + bar.get_width()/2., height,
-                     f'{height:.3f}', ha='center', va='bottom', fontsize=8)
-
-    # ========================================================================
-    # 12. Top-1 Agreement Comparison ⭐
-    # ========================================================================
-    ax12 = plt.subplot(4, 4, 12)
-    top1_camkd = metrics_camkd.get('top1_agreement', {})
-    top1_vanilla = metrics_vanilla.get('top1_agreement', {})
-
-    if top1_camkd and top1_vanilla and isinstance(top1_camkd, dict):
-        keys = sorted(top1_camkd.keys())
-        min_len_top1 = min(len(top1_camkd[key]) for key in keys if isinstance(top1_camkd[key], list))
-
-        if min_len_top1 > 0:
-            epochs_top1 = list(range(1, min_len_top1 + 1))
-            for key in keys:
-                if isinstance(top1_camkd[key], list):
-                    ax12.plot(epochs_top1, top1_camkd[key][:min_len_top1], 
-                             marker='o', label=f'{key} (CAMKD)', linewidth=2)
-
-            ax12.axhline(y=50, color='gray', linestyle='--', alpha=0.5, label='Random (50%)')
-            ax12.set_xlabel('Epoch', fontsize=11)
-            ax12.set_ylabel('Top-1 Agreement (%)', fontsize=11)
-            ax12.set_title('12. Top-1 Agreement: Student vs Teachers ⭐', fontsize=12, fontweight='bold')
-            ax12.legend(fontsize=9)
-            ax12.grid(True, alpha=0.3)
-            ax12.set_ylim([0, 105])
-
-    # ========================================================================
-    # 13. Final Top-1 Agreement Bar Chart ⭐
-    # ========================================================================
-    ax13 = plt.subplot(4, 4, 13)
-    if top1_camkd and top1_vanilla and isinstance(top1_camkd, dict):
-        keys = sorted(top1_camkd.keys())
-        final_camkd_top1 = [top1_camkd[key][-1] if isinstance(top1_camkd[key], list) else 0 for key in keys]
-        final_vanilla_top1 = [top1_vanilla.get(key, [0])[-1] if isinstance(top1_vanilla.get(key), list) else 0 for key in keys]
-
-        x = np.arange(len(keys))
-        width = 0.35
-
-        bars1 = ax13.bar(x - width/2, final_camkd_top1, width, label='CAMKD', alpha=0.8, color='blue')
-        bars2 = ax13.bar(x + width/2, final_vanilla_top1, width, label='Vanilla', alpha=0.8, color='red')
-
-        ax13.axhline(y=50, color='gray', linestyle='--', alpha=0.5)
-        ax13.set_ylabel('Agreement (%)', fontsize=11)
-        ax13.set_title('13. Final Top-1 Agreement Distribution ⭐', fontsize=12, fontweight='bold')
-        ax13.set_xticks(x)
-        ax13.set_xticklabels([k.replace('teacher_', 'T') for k in keys], rotation=0)
-        ax13.legend(fontsize=10)
-        ax13.grid(True, alpha=0.3, axis='y')
-        ax13.set_ylim([0, 105])
-
-        for bar in bars1:
-            height = bar.get_height()
-            ax13.text(bar.get_x() + bar.get_width()/2., height,
-                     f'{height:.1f}%', ha='center', va='bottom', fontsize=8)
-        for bar in bars2:
-            height = bar.get_height()
-            ax13.text(bar.get_x() + bar.get_width()/2., height,
-                     f'{height:.1f}%', ha='center', va='bottom', fontsize=8)
-
-    # ========================================================================
-    # 14. Summary Table
-    # ========================================================================
-    ax14 = plt.subplot(4, 4, 14)
-    ax14.axis('off')
-
-    final_acc_camkd = metrics_camkd['test_acc'][-1]
-    final_acc_vanilla = metrics_vanilla['test_acc'][-1]
-    acc_improvement = final_acc_camkd - final_acc_vanilla
-
-    centroid_camkd = metrics_camkd.get('centroid_fidelity', [])
-    centroid_vanilla = metrics_vanilla.get('centroid_fidelity', [])
-    final_centroid_camkd = centroid_camkd[-1] if centroid_camkd else 0
-    final_centroid_vanilla = centroid_vanilla[-1] if centroid_vanilla else 0
-
-    top1_avg_camkd = np.mean([v[-1] for v in top1_camkd.values() if isinstance(v, list)]) if top1_camkd else 0
-    top1_avg_vanilla = np.mean([v[-1] for v in top1_vanilla.values() if isinstance(v, list)]) if top1_vanilla else 0
-
-    summary_text = f"""
-    ╔════════════════════════════╗
-    ║   FINAL COMPARISON         ║
-    ╚════════════════════════════╝
-
-    Test Accuracy:
-      CAMKD:   {final_acc_camkd:.2f}%
-      Vanilla: {final_acc_vanilla:.2f}%
-      Δ:       {acc_improvement:+.2f}%
-
-    Centroid Fidelity (lower=better):
-      CAMKD:   {final_centroid_camkd:.4f}
-      Vanilla: {final_centroid_vanilla:.4f}
-      Δ:       {final_centroid_camkd - final_centroid_vanilla:+.4f}
-
-    Top-1 Agreement (higher=better) ⭐:
-      CAMKD:   {top1_avg_camkd:.1f}%
-      Vanilla: {top1_avg_vanilla:.1f}%
-      Δ:       {top1_avg_camkd - top1_avg_vanilla:+.1f}%
-
-    WINNER: {("CAMKD 🏆" if acc_improvement > 0 else "Vanilla 🏆" if acc_improvement < 0 else "TIE 🤝")}
-    """
-
-    ax14.text(0.05, 0.95, summary_text, fontsize=10, family='monospace',
-             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-
+    
+    # 11. Teacher Weights для CAMKD
+    ax11 = plt.subplot(3, 4, 11)
+    if 'camkd' in metrics_dict:
+        teacher_weights = metrics_dict['camkd'].get('teacher_weights', {})
+        if teacher_weights and isinstance(teacher_weights, dict):
+            weight_epochs = list(range(1, len(list(teacher_weights.values())[0]) + 1))
+            for i, (key, weights) in enumerate(teacher_weights.items()):
+                teacher_name = teacher_names[i] if i < len(teacher_names) else key
+                ax11.plot(weight_epochs, weights, marker='o', label=teacher_name, linewidth=2)
+        ax11.set_xlabel('Epoch', fontsize=11)
+        ax11.set_ylabel('Weight', fontsize=11)
+        ax11.set_title('CAMKD: Adaptive Teacher Weights', fontsize=12, fontweight='bold')
+        ax11.legend(fontsize=9)
+        ax11.grid(True, alpha=0.3)
+    
+    # 12. Overfitting Gap Comparison
+    ax12 = plt.subplot(3, 4, 12)
+    for method in methods:
+        train_acc = metrics_dict[method]['train_acc']
+        test_acc = metrics_dict[method]['test_acc']
+        gap = [tr - te for tr, te in zip(train_acc, test_acc)]
+        epochs = list(range(1, len(gap) + 1))
+        ax12.plot(epochs, gap, 
+                 color=colors.get(method, 'gray'), marker=markers.get(method, 'o'),
+                 label=method.capitalize(), linewidth=2, markersize=5)
+    ax12.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+    ax12.set_xlabel('Epoch', fontsize=11)
+    ax12.set_ylabel('Gap (%)', fontsize=11)
+    ax12.set_title('Overfitting Gap', fontsize=12, fontweight='bold')
+    ax12.legend()
+    ax12.grid(True, alpha=0.3)
+    
     plt.tight_layout()
-    plt.savefig(f'{save_dir}/comparison_camkd_vs_vanilla.png', 
-                dpi=150, bbox_inches='tight')
-    print(f"✓ Сохранено: {save_dir}/comparison_camkd_vs_vanilla.png (14 графиков)")
+    
+    save_path = f'{save_dir}/comparison_4methods.png'
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"✓ Графики сохранены: {save_path} (12 графиков)")
     plt.close()
 
 
-def print_comparison_statistics(metrics_camkd, metrics_vanilla):
-    """Выводит текстовую статистику сравнения"""
-
-    print("\n" + "="*70)
-    print("СТАТИСТИКА СРАВНЕНИЯ: CAMKD vs Vanilla KD")
-    print("="*70)
-
-    # Test Accuracy
-    print(f"\nTest Accuracy (Final):")
-    acc_camkd = metrics_camkd['test_acc'][-1]
-    acc_vanilla = metrics_vanilla['test_acc'][-1]
-    print(f"  CAMKD:   {acc_camkd:.2f}%")
-    print(f"  Vanilla: {acc_vanilla:.2f}%")
-    print(f"  Δ:       {acc_camkd - acc_vanilla:+.2f}%")
-
-    # Test Loss
-    print(f"\nTest Loss (Final):")
-    loss_camkd = metrics_camkd['test_loss'][-1]
-    loss_vanilla = metrics_vanilla['test_loss'][-1]
-    print(f"  CAMKD:   {loss_camkd:.4f}")
-    print(f"  Vanilla: {loss_vanilla:.4f}")
-    print(f"  Δ:       {loss_camkd - loss_vanilla:+.4f}")
-
-    # Individual Fidelity
-    individual_camkd = metrics_camkd.get('individual_fidelity', {})
-    individual_vanilla = metrics_vanilla.get('individual_fidelity', {})
-
-    if individual_camkd and individual_vanilla and isinstance(individual_camkd, dict):
-        print(f"\nIndividual Fidelity (Final):")
-        camkd_values = []
-        vanilla_values = []
-
-        for key in sorted(individual_camkd.keys()):
-            if isinstance(individual_camkd[key], list) and len(individual_camkd[key]) > 0:
-                camkd_val = individual_camkd[key][-1]
-                vanilla_val = individual_vanilla.get(key, [0])[-1] if isinstance(individual_vanilla.get(key), list) else 0
-                camkd_values.append(camkd_val)
-                vanilla_values.append(vanilla_val)
-                print(f"  {key}:")
-                print(f"    CAMKD:   {camkd_val:.4f}")
-                print(f"    Vanilla: {vanilla_val:.4f}")
-                print(f"    Δ:       {camkd_val - vanilla_val:+.4f}")
-
-        if camkd_values:
-            print(f"  Average:")
-            print(f"    CAMKD:   {np.mean(camkd_values):.4f}")
-            print(f"    Vanilla: {np.mean(vanilla_values):.4f}")
-            print(f"    Δ:       {np.mean(camkd_values) - np.mean(vanilla_values):+.4f}")
-
-    # Centroid Fidelity
-    centroid_camkd = metrics_camkd.get('centroid_fidelity', [])
-    centroid_vanilla = metrics_vanilla.get('centroid_fidelity', [])
-
-    if centroid_camkd and centroid_vanilla:
-        print(f"\nCentroid Fidelity (Final):")
-        print(f"  CAMKD:   {centroid_camkd[-1]:.4f}")
-        print(f"  Vanilla: {centroid_vanilla[-1]:.4f}")
-        print(f"  Δ:       {centroid_camkd[-1] - centroid_vanilla[-1]:+.4f}")
-
-    # Teacher Weights
-    teacher_weights_camkd = metrics_camkd.get('teacher_weights', {})
-    teacher_weights_vanilla = metrics_vanilla.get('teacher_weights', {})
-
-    if teacher_weights_camkd and isinstance(teacher_weights_camkd, dict):
-        print(f"\nTeacher Weights (Final):")
-        print(f"  CAMKD (адаптивные):")
-        for key in sorted(teacher_weights_camkd.keys()):
-            if isinstance(teacher_weights_camkd[key], list) and len(teacher_weights_camkd[key]) > 0:
-                print(f"    {key}: {teacher_weights_camkd[key][-1]:.4f}")
-
-        if teacher_weights_vanilla and isinstance(teacher_weights_vanilla, dict):
-            print(f"  Vanilla (равные):")
-            for key in sorted(teacher_weights_vanilla.keys()):
-                if isinstance(teacher_weights_vanilla[key], list) and len(teacher_weights_vanilla[key]) > 0:
-                    print(f"    {key}: {teacher_weights_vanilla[key][-1]:.4f}")
-
-    # Top-1 Agreement
-    top1_camkd = metrics_camkd.get('top1_agreement', {})
-    top1_vanilla = metrics_vanilla.get('top1_agreement', {})
-
-    if top1_camkd and top1_vanilla and isinstance(top1_camkd, dict):
-        print(f"\nTop-1 Agreement (Final %) ⭐:")
-        camkd_agr = []
-        vanilla_agr = []
-
-        for key in sorted(top1_camkd.keys()):
-            if isinstance(top1_camkd[key], list) and len(top1_camkd[key]) > 0:
-                camkd_val = top1_camkd[key][-1]
-                vanilla_val = top1_vanilla.get(key, [0])[-1] if isinstance(top1_vanilla.get(key), list) else 0
-                camkd_agr.append(camkd_val)
-                vanilla_agr.append(vanilla_val)
-                print(f"  {key}:")
-                print(f"    CAMKD:   {camkd_val:.1f}%")
-                print(f"    Vanilla: {vanilla_val:.1f}%")
-                print(f"    Δ:       {camkd_val - vanilla_val:+.1f}%")
-
-        if camkd_agr:
-            print(f"  Average:")
-            print(f"    CAMKD:   {np.mean(camkd_agr):.1f}%")
-            print(f"    Vanilla: {np.mean(vanilla_agr):.1f}%")
-            print(f"    Δ:       {np.mean(camkd_agr) - np.mean(vanilla_agr):+.1f}%")
-
-    print("="*70 + "\n")
-
-
-def compare_experiments(dataset, save_dir='./results'):
-    """Главная функция для сравнения экспериментов"""
-
+def compare_4methods(dataset, save_dir='./results'):
+    """
+    Главная функция для сравнения 4 методов
+    
+    Загружает метрики для: Centroid, Best, Median, CAMKD
+    """
+    
     dataset_dir = f'{save_dir}/{dataset.lower()}'
-
+    
     print(f"\n🔍 Загрузка метрик из: {dataset_dir}/")
-
-    # Load metrics
-    metrics_camkd = load_metrics(f'{dataset_dir}/metrics_camkd.json')
-    metrics_vanilla = load_metrics(f'{dataset_dir}/metrics_vanilla.json')
-
-    if metrics_camkd is None or metrics_vanilla is None:
-        print("\n✗ Не удалось загрузить метрики!")
+    
+    # Load metrics for all 4 methods
+    methods = ['centroid', 'best', 'median', 'camkd']
+    metrics_dict = {}
+    
+    for method in methods:
+        metrics_path = f'{dataset_dir}/metrics_{method}.json'
+        metrics = load_metrics(metrics_path)
+        if metrics is None:
+            print(f"\n⚠️ Метрики для {method} не найдены!")
+            print(f"Ожидался файл: {metrics_path}")
+        else:
+            metrics_dict[method] = metrics
+    
+    if len(metrics_dict) == 0:
+        print("\n✗ Не удалось загрузить ни одной метрики!")
         print("Сначала запустите обучение:")
-        print("  python train_student.py --dataset FashionMNIST --methods both")
+        print("  python train_student_4methods.py --config ...")
         return False
-
-    # Infer teacher names
-    teacher_names = ['Teacher 1', 'Teacher 2', 'Teacher 3']
-
+    
+    # Infer teacher names from first method
+    first_method = list(metrics_dict.values())[0]
+    num_teachers = len(first_method.get('individual_fidelity', {}))
+    teacher_names = [f'Teacher {i+1}' for i in range(num_teachers)]
+    
     # Print statistics
-    print_comparison_statistics(metrics_camkd, metrics_vanilla)
-
+    print_comparison_statistics_4methods(metrics_dict, teacher_names)
+    
     # Plot comparison
-    compare_two_methods(metrics_camkd, metrics_vanilla, teacher_names, dataset_dir)
-
+    compare_4methods_plot(metrics_dict, teacher_names, dataset_dir)
+    
     print(f"✓ Анализ завершён!")
     print(f"✓ Результаты сохранены в: {dataset_dir}/")
-
+    
     return True
 
 
 if __name__ == '__main__':
     import argparse
-
-    parser = argparse.ArgumentParser('Анализ результатов Knowledge Distillation')
+    
+    parser = argparse.ArgumentParser('Анализ результатов: 4 метода дистилляции')
     parser.add_argument('--dataset', type=str, default='FashionMNIST',
                        choices=['MNIST', 'FashionMNIST', 'CIFAR10'])
     parser.add_argument('--save_dir', type=str, default='./results')
-
+    
     args = parser.parse_args()
-
-    success = compare_experiments(args.dataset, args.save_dir)
-
+    
+    success = compare_4methods(args.dataset, args.save_dir)
+    
     if not success:
         exit(1)
-

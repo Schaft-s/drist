@@ -14,7 +14,7 @@ class StudentNet(nn.Module):
         self.conv1 = nn.Conv2d(1, 16, 3, padding=1)
         self.conv2 = nn.Conv2d(16, 32, 3, padding=1)
         self.pool = nn.MaxPool2d(2, 2)
-        self.fc1 = nn.Linear(32 * 7 * 7, 128)
+        self.fc1 = nn.LazyLinear(128)
         self.fc2 = nn.Linear(128, num_classes)
         self.dropout = nn.Dropout(0.25)
 
@@ -36,9 +36,40 @@ student_model_dict = {
 }
 
 
-def count_parameters(model):
-    """Подсчитывает количество параметров модели"""
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+def count_parameters(model, device='cuda' if torch.cuda.is_available() else 'cpu'):
+    """Подсчитывает параметры с инициализацией LazyLinear"""
+    import torch.nn as nn
+    
+    has_lazy = any(isinstance(m, nn.modules.lazy.LazyModuleMixin) for m in model.modules())
+    
+    if has_lazy:
+        try:
+            dummy_input = torch.randn(1, 1, 28, 28).to(device)
+            with torch.no_grad():
+                if hasattr(model, 'is_feat'):
+                    model(dummy_input, is_feat=False)
+                else:
+                    model(dummy_input)
+        except Exception:
+            try:
+                dummy_input = torch.randn(1, 3, 32, 32).to(device)
+                with torch.no_grad():
+                    if hasattr(model, 'is_feat'):
+                        model(dummy_input, is_feat=False)
+                    else:
+                        model(dummy_input)
+            except Exception:
+                pass
+    
+    total_params = 0
+    for param in model.parameters():
+        try:
+            if param.requires_grad:
+                total_params += param.numel()
+        except ValueError:
+            pass
+    
+    return total_params
 
 
 if __name__ == '__main__':

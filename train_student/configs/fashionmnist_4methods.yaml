@@ -1,0 +1,24 @@
+# Конфигурация для обучения 4 студентов методом 4methods
+# Параллельное обучение: Centroid, Best, Median, CAMKD
+
+dataset: FashionMNIST
+epochs: 20
+batch_size: 128
+lr: 0.001
+temperature: 4.0
+alpha: 0.7
+beta: 100.0
+hint_layer: -2
+teacher_dir: ./pretrained
+save_dir: ./results
+fidelity_freq: 1
+
+teacher_names:
+  - teacher_cnn1
+  - teacher_cnn2
+  - teacher_resnet
+  - teacher_vgg
+  - teacher_densenet
+
+# Методы для обучения (все 4)
+methods: all  # [centroid, best, median, camkd]

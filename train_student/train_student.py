@@ -262,7 +262,9 @@ def train_student_method(method_name, student, teachers, teacher_names,
         # Setup CAMKD
         regress_list = nn.ModuleList()
 
-        dummy_input = torch.randn(2, 1 if config['dataset'] != 'CIFAR10' else 3, 28, 28).to(device)
+        img_size = 32 if config['dataset'] == 'CIFAR10' else 28
+        channels = 3 if config['dataset'] == 'CIFAR10' else 1
+        dummy_input = torch.randn(2, channels, img_size, img_size)
 
         student.to(device)
         feat_s, _ = student(dummy_input, is_feat=True)
