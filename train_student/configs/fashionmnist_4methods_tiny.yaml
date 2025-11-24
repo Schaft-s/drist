@@ -1,0 +1,26 @@
+# Конфигурация для обучения TINY студентов (слабых)
+dataset: FashionMNIST
+epochs: 20  # Можно увеличить, так как модель слабее и учится дольше
+batch_size: 128
+lr: 0.001
+temperature: 4.0
+alpha: 0.9
+beta: 100.0
+hint_layer: -1
+teacher_dir: ./pretrained
+save_dir: ./results_tiny  # Сохраняем в отдельную папку
+fidelity_freq: 1
+
+# Указываем учителей (те же самые)
+teacher_names:
+  - teacher_cnn1
+  - teacher_cnn2
+  - teacher_resnet
+  - teacher_vgg
+  - teacher_densenet
+
+# ВАЖНО: Указываем новую модель студента
+student_model: tiny_student
+
+# Параметры для эксперимента 2
+exp2_epochs: 20

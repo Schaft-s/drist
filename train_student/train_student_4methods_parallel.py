@@ -379,9 +379,20 @@ def train_4methods_parallel(config):
     print("Инициализация 4 студентов")
     print("="*70)
     
+    student_model_name = config.get('student_model', 'student')
+    print(f"Используем архитектуру студента: {student_model_name}")
+
     for method_name in ['centroid', 'best', 'median', 'camkd']:
-        student = student_model_dict['student'](num_classes=10).to(device)
+        # Используем динамическое имя модели
+        if student_model_name not in student_model_dict:
+            raise ValueError(f"Модель {student_model_name} не найдена в student_model_dict")
+            
+        student = student_model_dict[student_model_name](num_classes=10).to(device)
         students[method_name] = student
+
+    # for method_name in ['centroid', 'best', 'median', 'camkd']:
+    #     student = student_model_dict['student'](num_classes=10).to(device)
+    #     students[method_name] = student
         
         print(f"{method_name:10s}: {count_parameters(student):,} параметров")
         
